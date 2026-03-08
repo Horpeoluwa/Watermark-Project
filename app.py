@@ -84,7 +84,7 @@ if uploaded_file and logo_file and is_trained:
             
             # --- VISUAL CLIPPING FIX ---
             residual = watermarked_tensor - host_tensor
-            residual = torch.clamp(residual, -0.02, 0.02) # Invisible threshold
+            residual = torch.clamp(residual, -0.02, 0.01) # Invisible threshold
             watermarked_tensor = torch.clamp(host_tensor + residual, 0, 1)
             
             st.write("Extracting for verification...")
