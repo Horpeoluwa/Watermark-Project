@@ -37,7 +37,7 @@ with st.sidebar:
     
     if is_trained:
         st.success("✅ Model: Fully Trained (Epoch 10)")
-        st.write("**Dataset:** COCO 2017 (5k Images)")
+        st.write("**Dataset:** COCO 2017 (10k Images)")
         st.write("**Partition:** 70/20/10 Split")
     else:
         st.error("⚠️ Weights missing!")
