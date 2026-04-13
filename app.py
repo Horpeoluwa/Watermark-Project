@@ -5,6 +5,7 @@ import os
 from model import WatermarkEncoder, WatermarkDecoder
 from PIL import Image
 import io
+from skimage.metrics import peak_signal_noise_ratio as calculate_psnr
 
 # --- 1. PAGE CONFIG & THEME ---
 st.set_page_config(
@@ -20,9 +21,13 @@ def load_models():
     encoder = WatermarkEncoder()
     decoder = WatermarkDecoder()
     
-    if os.path.exists('encoder_weights.pth') and os.path.exists('decoder_weights.pth'):
-        encoder.load_state_dict(torch.load('encoder_weights.pth', map_location=torch.device('cpu')))
-        decoder.load_state_dict(torch.load('decoder_weights.pth', map_location=torch.device('cpu')))
+    # Updated paths to match your 10k weights if you renamed them
+    enc_path = 'encoder_weights.pth'
+    dec_path = 'decoder_weights.pth'
+    
+    if os.path.exists(enc_path) and os.path.exists(dec_path):
+        encoder.load_state_dict(torch.load(enc_path, map_location=torch.device('cpu')))
+        decoder.load_state_dict(torch.load(dec_path, map_location=torch.device('cpu')))
         encoder.eval()
         decoder.eval()
         return encoder, decoder, True
@@ -38,61 +43,71 @@ with st.sidebar:
     if is_trained:
         st.success("✅ Model: Fully Trained (Epoch 10)")
         st.write("**Dataset:** COCO 2017 (10k Images)")
-        st.write("**Partition:** 70/20/10 Split")
+        st.write("**Architecture:** Conv Encoder-Decoder")
     else:
-        st.error("⚠️ Weights missing!")
+        st.error("⚠️ Weights missing! Ensure .pth files are in GitHub.")
     
     st.divider()
     st.subheader("How it works")
     st.info("""
-    1. **Upload** your host photo.
-    2. **Upload** your ownership logo.
-    3. **AI** embeds the logo invisibly.
-    4. **Decoder** recovers it for proof.
+    1. **Upload** host photo.
+    2. **Upload** ownership logo.
+    3. **AI** embeds logo invisibly.
+    4. **Metrics** verify quality.
     """)
-    st.caption("Developed for M.Tech Thesis - FUTA")
+    st.caption("M.Tech Thesis - Federal University of Technology, Akure")
 
 # --- 4. MAIN INTERFACE ---
 st.title("🛡️ Image Ownership & Forensic Tool")
 st.markdown("---")
 
-# Use columns for a clean upload row
 col_up1, col_up2 = st.columns(2)
 with col_up1:
     st.subheader("1. Host Image")
-    uploaded_file = st.file_uploader("Select Photo (House, Portrait, etc.)", type=["jpg", "png", "jpeg"])
+    uploaded_file = st.file_uploader("Select Photo", type=["jpg", "png", "jpeg"])
 with col_up2:
     st.subheader("2. Ownership Logo")
-    logo_file = st.file_uploader("Select Logo (64x64 recommended)", type=["png", "jpg"])
+    logo_file = st.file_uploader("Select Logo", type=["png", "jpg"])
 
 if uploaded_file and logo_file and is_trained:
-    # Processing images via PIL for RGB consistency
     raw_img = Image.open(uploaded_file).convert('RGB')
     img_res = np.array(raw_img.resize((256, 256)))
     
     raw_logo = Image.open(logo_file).convert('L') 
     logo_res = np.array(raw_logo.resize((64, 64)))
 
-    with st.status("Performing Forensic Embedding...", expanded=True) as status:
-        st.write("Converting to Tensors...")
+    with st.status("Performing Forensic Analysis...", expanded=True) as status:
+        st.write("Preparing Tensors...")
         host_tensor = torch.from_numpy(img_res).permute(2, 0, 1).float().unsqueeze(0) / 255.0
         logo_tensor = torch.from_numpy(logo_res).float().unsqueeze(0).unsqueeze(0) / 255.0
 
-        st.write("Encoding invisible watermark...")
         with torch.no_grad():
+            # Encoding
             watermarked_tensor = encoder(host_tensor, logo_tensor)
             
-            # --- VISUAL CLIPPING FIX ---
-            residual = watermarked_tensor - host_tensor
-            residual = torch.clamp(residual, -0.02, 0.01) # Invisible threshold
+            # --- 1% INVISIBILITY CONSTRAINT ---
+            residual = torch.clamp(watermarked_tensor - host_tensor, -0.01, 0.01)
             watermarked_tensor = torch.clamp(host_tensor + residual, 0, 1)
             
-            st.write("Extracting for verification...")
+            # Decoding
             extracted_tensor = decoder(watermarked_tensor)
 
-        # Denormalize
-        wm_img = (watermarked_tensor.squeeze().permute(1, 2, 0).cpu().numpy() * 255).astype(np.uint8)
-        ex_logo = (extracted_tensor.squeeze().cpu().numpy() * 255).astype(np.uint8)
+        # Denormalize for display
+        wm_img_float = watermarked_tensor.squeeze().permute(1, 2, 0).cpu().numpy()
+        wm_img = (wm_img_float * 255).astype(np.uint8)
+        
+        ex_logo_float = extracted_tensor.squeeze().cpu().numpy()
+        ex_logo = (ex_logo_float * 255).astype(np.uint8)
+        
+        # --- CALCULATE REAL METRICS ---
+        orig_float = img_res / 255.0
+        real_psnr = calculate_psnr(orig_float, wm_img_float, data_range=1.0)
+        
+        # NC Score Calculation
+        logo_float = logo_res / 255.0
+        nc_score = np.sum((logo_float - np.mean(logo_float)) * (ex_logo_float - np.mean(ex_logo_float))) / \
+                   (np.sqrt(np.sum((logo_float - np.mean(logo_float))**2) * np.sum((ex_logo_float - np.mean(ex_logo_float))**2)) + 1e-8)
+
         status.update(label="Forensics Complete!", state="complete", expanded=False)
 
     st.divider()
@@ -105,20 +120,18 @@ if uploaded_file and logo_file and is_trained:
         st.image(img_res, caption="Original Host", use_container_width=True)
     with res_col2:
         st.image(wm_img, caption="Watermarked (Invisible)", use_container_width=True)
-        # Download Button for the Client
-        result_pil = Image.fromarray(wm_img)
         buf = io.BytesIO()
-        result_pil.save(buf, format="PNG")
+        Image.fromarray(wm_img).save(buf, format="PNG")
         st.download_button("Download Protected Image", buf.getvalue(), "protected_image.png", "image/png")
     with res_col3:
         st.image(ex_logo, caption="Recovered Proof", use_container_width=True)
 
-    # Metrics Footer
+    # DYNAMIC METRICS FOOTER
     st.success("✅ Ownership Verified via Deep Learning Analysis")
     cols = st.columns(3)
-    cols[0].metric("PSNR", "31.14 dB")
-    cols[1].metric("NC Score", "0.9825")
-    cols[2].metric("Generalization", "5,000 Images")
+    cols[0].metric("PSNR (Quality)", f"{real_psnr:.2f} dB")
+    cols[1].metric("NC Score (Accuracy)", f"{max(0, nc_score):.4f}")
+    cols[2].metric("Generalization", "10,000 Images")
 
 else:
-    st.info("👋 Please upload both a Host Image and a Logo to begin the forensic analysis.")
+    st.info("👋 Upload a Host Image and a Logo to begin.")
