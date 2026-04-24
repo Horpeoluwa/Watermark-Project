@@ -58,7 +58,7 @@ with st.sidebar:
     st.caption("M.Tech Thesis - Federal University of Technology, Akure")
 
 # --- 4. MAIN INTERFACE ---
-st.title("🛡️ Image Ownership & Forensic Tool")
+st.title("🛡️ Image Ownership Identification Against Adversarial Attacks")
 st.markdown("---")
 
 col_up1, col_up2 = st.columns(2)
