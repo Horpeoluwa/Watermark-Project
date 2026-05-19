@@ -6,6 +6,7 @@ from model import WatermarkEncoder, WatermarkDecoder
 from PIL import Image
 import io
 from skimage.metrics import peak_signal_noise_ratio as calculate_psnr
+from skimage.metrics import structural_similarity as calculate_ssim
 
 # --- 1. PAGE CONFIG & THEME ---
 st.set_page_config(
@@ -21,7 +22,6 @@ def load_models():
     encoder = WatermarkEncoder()
     decoder = WatermarkDecoder()
     
-    # Updated paths to match your 10k weights if you renamed them
     enc_path = 'encoder_weights.pth'
     dec_path = 'decoder_weights.pth'
     
@@ -101,9 +101,14 @@ if uploaded_file and logo_file and is_trained:
         
         # --- CALCULATE REAL METRICS ---
         orig_float = img_res / 255.0
+        
+        # 1. PSNR Metric
         real_psnr = calculate_psnr(orig_float, wm_img_float, data_range=1.0)
         
-        # NC Score Calculation
+        # 2. SSIM Metric (Added)
+        real_ssim = calculate_ssim(orig_float, wm_img_float, channel_axis=2, data_range=1.0)
+        
+        # 3. NC Score Metric
         logo_float = logo_res / 255.0
         nc_score = np.sum((logo_float - np.mean(logo_float)) * (ex_logo_float - np.mean(ex_logo_float))) / \
                    (np.sqrt(np.sum((logo_float - np.mean(logo_float))**2) * np.sum((ex_logo_float - np.mean(ex_logo_float))**2)) + 1e-8)
@@ -126,12 +131,25 @@ if uploaded_file and logo_file and is_trained:
     with res_col3:
         st.image(ex_logo, caption="Recovered Proof", use_container_width=True)
 
-    # DYNAMIC METRICS FOOTER
+    # DYNAMIC METRICS DASHBOARD
     st.success("✅ Ownership Verified via Deep Learning Analysis")
     cols = st.columns(3)
-    cols[0].metric("PSNR (Quality)", f"{real_psnr:.2f} dB")
-    cols[1].metric("NC Score (Accuracy)", f"{max(0, nc_score):.4f}")
-    cols[2].metric("Generalization", "10,000 Images")
+    
+    cols[0].metric(
+        label="PSNR (Imperceptibility)", 
+        value=f"{real_psnr:.2f} dB",
+        help="Higher values indicate low visual distortion."
+    )
+    cols[1].metric(
+        label="SSIM (Structural Quality)", 
+        value=f"{real_ssim:.4f}",
+        help="Structural Similarity Index. Value closer to 1.0 indicates perfect layout preservation."
+    )
+    cols[2].metric(
+        label="NC Score (Extraction Accuracy)", 
+        value=f"{max(0, nc_score):.4f}",
+        help="Normalized Correlation. Value closer to 1.0 indicates higher fidelity verification."
+    )
 
 else:
     st.info("👋 Upload a Host Image and a Logo to begin.")
